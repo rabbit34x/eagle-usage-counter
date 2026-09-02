@@ -25,13 +25,20 @@ Eagleの「プラグイン → 開発者オプション」から、このディ�
 
 ## データ保存先
 
-可能ならEagle (Electron) の `userData` 配下、取得できない環境ではOSのユーザーデータディレクトリ配下に保存します。ライブラリパスのSHA-256を使ってライブラリ別のディレクトリを作成します。
+Eagleライブラリ自体を変更しないように、ライブラリと同じ親ディレクトリへサイドカーフォルダーを作成します。
 
 ```text
-<userData>/eagle-usage-counter/libraries/<library hash>/usage.sqlite
+<library parent>/<library name>.usage-counter/usage.sqlite
 ```
 
-画像本体やEagleの `metadata.json` は変更しません。画像を再登録してEagle item IDが変わった場合は、旧履歴とは自動で結合されません。
+例：
+
+```text
+\\NAS\share\Pictures.library
+\\NAS\share\Pictures.library.usage-counter\usage.sqlite
+```
+
+v0.3以前のローカルDBがあり、保存先にまだDBがない場合は、初回起動時に自動コピーします。元のローカルDBはバックアップとして残します。画像本体やEagleの `metadata.json` は変更しません。画像を再登録してEagle item IDが変わった場合は、旧履歴とは自動で結合されません。
 
 ## 技術構成
 
