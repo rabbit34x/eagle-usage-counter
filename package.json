@@ -1,0 +1,16 @@
+{
+  "name": "eagle-usage-counter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local usage history and rankings for Eagle items",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check js/plugin.js && node --check js/database.js"
+  },
+  "dependencies": {
+    "sql.js": "^1.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

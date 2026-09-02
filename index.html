@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usage Counter</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">EAGLE LOCAL HISTORY</p>
+        <h1>Usage Counter</h1>
+      </div>
+      <button id="refresh-button" class="button ghost" type="button">選択を更新</button>
+    </header>
+
+    <section class="panel selection-panel">
+      <div>
+        <span class="label">現在の選択</span>
+        <strong id="selection-count" class="large-number">—</strong>
+        <span>件</span>
+      </div>
+      <button id="record-button" class="button primary" type="button" disabled>選択画像を使用済みにする</button>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <section id="selected-items" class="selected-items" aria-label="選択画像"></section>
+
+    <section class="panel summary">
+      <div><span class="label">記録数</span><strong id="event-count">0</strong></div>
+      <div><span class="label">使用画像</span><strong id="item-count">0</strong></div>
+      <button id="undo-button" class="button danger" type="button">直前の記録を取り消す</button>
+    </section>
+
+    <section class="ranking-section">
+      <div class="section-header">
+        <h2>ランキング</h2>
+        <select id="period-select" aria-label="集計期間">
+          <option value="all">全期間</option>
+          <option value="30">過去30日</option>
+          <option value="7">過去7日</option>
+          <option value="1">今日</option>
+        </select>
+      </div>
+      <ol id="ranking" class="ranking"></ol>
+      <p id="empty-ranking" class="empty">まだ使用記録がありません。</p>
+    </section>
+
+    <footer>
+      <button id="backup-button" class="text-button" type="button">DBをバックアップ</button>
+      <button id="restore-button" class="text-button" type="button">DBを復元</button>
+      <span id="library-name"></span>
+    </footer>
+  </main>
+  <script src="js/plugin.js"></script>
+</body>
+</html>
