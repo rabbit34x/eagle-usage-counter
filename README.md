@@ -38,7 +38,7 @@ Eagleライブラリ自体を変更しないように、ライブラリと同じ
 \\NAS\share\Pictures.library.plugin-data\sqlite\usage-counter\usage.sqlite
 ```
 
-共通の `plugin-data` 以下へ、データ形式とプラグイン名で分けて保存します。v0.4以前のDBがあり、新しい保存先にまだDBがない場合は、初回起動時に自動コピーします。移行元のDBはバックアップとして残します。画像本体やEagleの `metadata.json` は変更しません。画像を再登録してEagle item IDが変わった場合は、旧履歴とは自動で結合されません。
+共通の `plugin-data` 以下へ、データ形式とプラグイン名で分けて保存します。画像本体やEagleの `metadata.json` は変更しません。画像を再登録してEagle item IDが変わった場合は、旧履歴とは自動で結合されません。
 
 ## 技術構成
 
