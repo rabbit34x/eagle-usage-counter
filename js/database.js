@@ -153,6 +153,17 @@ class UsageDatabase {
     return new Map(rows.map((row) => [row.eagle_item_id, row]));
   }
 
+  getDailyActivity({ since, until = Date.now() } = {}) {
+    return this.query(`
+      SELECT strftime('%Y-%m-%d', used_at / 1000, 'unixepoch', 'localtime') AS day,
+             COUNT(*) AS usage_count
+      FROM usage_events
+      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+      GROUP BY day
+      ORDER BY day
+    `, [since ?? 0, until]);
+  }
+
   getRanking({ since = null, limit = 100 } = {}) {
     const condition = since == null ? '' : 'AND e.used_at >= ?';
     const params = since == null ? [limit] : [since, limit];

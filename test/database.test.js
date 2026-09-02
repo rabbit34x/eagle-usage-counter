@@ -34,6 +34,9 @@ test('records one event per unique selected item and ranks items', () => {
     assert.equal(ranking[0].eagle_item_id, 'a');
     assert.equal(ranking[0].usage_count, 2);
     assert.equal(ranking[1].usage_count, 1);
+    const activity = database.getDailyActivity({ since: Date.now() - 60_000 });
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0].usage_count, 3);
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });
