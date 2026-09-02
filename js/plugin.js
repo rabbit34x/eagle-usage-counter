@@ -320,14 +320,6 @@ async function selectRankingItem(itemId) {
       await eagle.item.select([itemId]);
       return;
     }
-    if (typeof eagle.item.open === 'function') {
-      await eagle.item.open(itemId);
-      return;
-    }
-    if (typeof item?.open === 'function') {
-      await item.open();
-      return;
-    }
     throw new Error(`画像選択APIに対応していません（Eagle ${eagle.app.version} Build ${eagle.app.build}）。`);
   } catch (error) {
     console.error(error);
