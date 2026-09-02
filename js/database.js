@@ -18,7 +18,7 @@ class UsageDatabase {
 
   migrate() {
     const version = this.db.exec('PRAGMA user_version')[0]?.values[0]?.[0] ?? 0;
-    if (version > 2) throw new Error(`未対応のデータベースバージョンです: ${version}`);
+    if (version > 3) throw new Error(`未対応のデータベースバージョンです: ${version}`);
     if (version === 0) {
       this.db.run(`
         CREATE TABLE items (
@@ -27,7 +27,8 @@ class UsageDatabase {
           extension TEXT NOT NULL DEFAULT '',
           thumbnail_url TEXT NOT NULL DEFAULT '',
           first_seen_at INTEGER NOT NULL,
-          last_seen_at INTEGER NOT NULL
+          last_seen_at INTEGER NOT NULL,
+          is_deleted INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE usage_events (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +54,7 @@ class UsageDatabase {
         CREATE INDEX idx_usage_events_time ON usage_events(used_at);
         CREATE INDEX idx_usage_events_batch ON usage_events(batch_id);
         CREATE INDEX idx_usage_adjustments_item ON usage_adjustments(eagle_item_id, created_at);
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
       `);
       return true;
     }
@@ -72,7 +73,15 @@ class UsageDatabase {
         );
         CREATE INDEX idx_usage_events_recorded ON usage_events(eagle_item_id, recorded_at);
         CREATE INDEX idx_usage_adjustments_item ON usage_adjustments(eagle_item_id, created_at);
-        PRAGMA user_version = 2;
+        ALTER TABLE items ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;
+        PRAGMA user_version = 3;
+      `);
+      return true;
+    }
+    if (version === 2) {
+      this.db.run(`
+        ALTER TABLE items ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;
+        PRAGMA user_version = 3;
       `);
       return true;
     }
@@ -160,7 +169,8 @@ class UsageDatabase {
         name = excluded.name,
         extension = excluded.extension,
         thumbnail_url = excluded.thumbnail_url,
-        last_seen_at = excluded.last_seen_at
+        last_seen_at = excluded.last_seen_at,
+        is_deleted = 0
     `);
   }
 
@@ -254,8 +264,9 @@ class UsageDatabase {
     return this.query(`
       SELECT strftime('%Y-%m-%d', used_at / 1000, 'unixepoch', 'localtime') AS day,
              COUNT(*) AS usage_count
-      FROM usage_events
-      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+      FROM usage_events e
+      JOIN items i ON i.eagle_item_id = e.eagle_item_id AND i.is_deleted = 0
+      WHERE e.reverted_at IS NULL AND e.used_at >= ? AND e.used_at <= ?
       GROUP BY day
       ORDER BY day
     `, [since ?? 0, until]);
@@ -264,13 +275,15 @@ class UsageDatabase {
   getPeriodStats({ since = 0, until = Date.now(), includeUndated = false } = {}) {
     return this.query(`
       WITH dated AS (
-        SELECT eagle_item_id, used_at
-        FROM usage_events
-        WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+        SELECT e.eagle_item_id, e.used_at
+        FROM usage_events e
+        JOIN items i ON i.eagle_item_id = e.eagle_item_id AND i.is_deleted = 0
+        WHERE e.reverted_at IS NULL AND e.used_at >= ? AND e.used_at <= ?
       ), undated AS (
-        SELECT eagle_item_id, amount
-        FROM usage_adjustments
-        WHERE reverted_at IS NULL AND ? = 1
+        SELECT a.eagle_item_id, a.amount
+        FROM usage_adjustments a
+        JOIN items i ON i.eagle_item_id = a.eagle_item_id AND i.is_deleted = 0
+        WHERE a.reverted_at IS NULL AND ? = 1
       )
       SELECT (SELECT COUNT(*) FROM dated) + COALESCE((SELECT SUM(amount) FROM undated), 0) AS event_count,
              (SELECT COUNT(*) FROM (
@@ -297,9 +310,10 @@ class UsageDatabase {
     return this.query(`
       SELECT ${bucket} AS bucket,
              COUNT(*) AS usage_count,
-             COUNT(DISTINCT eagle_item_id) AS item_count
-      FROM usage_events
-      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+             COUNT(DISTINCT e.eagle_item_id) AS item_count
+      FROM usage_events e
+      JOIN items i ON i.eagle_item_id = e.eagle_item_id AND i.is_deleted = 0
+      WHERE e.reverted_at IS NULL AND e.used_at >= ? AND e.used_at <= ?
       GROUP BY bucket
       ORDER BY bucket
     `, [since, until]);
@@ -309,9 +323,10 @@ class UsageDatabase {
     return this.query(`
       SELECT CAST(strftime('%w', used_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS weekday,
              COUNT(*) AS usage_count,
-             COUNT(DISTINCT eagle_item_id) AS item_count
-      FROM usage_events
-      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+             COUNT(DISTINCT e.eagle_item_id) AS item_count
+      FROM usage_events e
+      JOIN items i ON i.eagle_item_id = e.eagle_item_id AND i.is_deleted = 0
+      WHERE e.reverted_at IS NULL AND e.used_at >= ? AND e.used_at <= ?
       GROUP BY weekday
       ORDER BY weekday
     `, [since, until]);
@@ -338,6 +353,7 @@ class UsageDatabase {
              MAX(t.last_used_at) AS last_used_at
       FROM totals t
       JOIN items i ON i.eagle_item_id = t.eagle_item_id
+      WHERE i.is_deleted = 0
       GROUP BY t.eagle_item_id
       ORDER BY usage_count DESC, last_used_at DESC
       LIMIT ?
@@ -346,6 +362,42 @@ class UsageDatabase {
 
   getStats() {
     return this.getPeriodStats({ includeUndated: true });
+  }
+
+  getTrackedItemIds() {
+    return this.query('SELECT eagle_item_id FROM items ORDER BY eagle_item_id')
+      .map((row) => row.eagle_item_id);
+  }
+
+  synchronizeItems(existingItems, missingIds) {
+    const states = existingItems.map((item) => ({
+      id: item.id,
+      isDeleted: item.isDeleted ? 1 : 0,
+    }));
+    this.transaction(() => {
+      const updateState = this.db.prepare('UPDATE items SET is_deleted = ? WHERE eagle_item_id = ?');
+      const deleteEvents = this.db.prepare('DELETE FROM usage_events WHERE eagle_item_id = ?');
+      const deleteAdjustments = this.db.prepare('DELETE FROM usage_adjustments WHERE eagle_item_id = ?');
+      const deleteItem = this.db.prepare('DELETE FROM items WHERE eagle_item_id = ?');
+      try {
+        for (const state of states) updateState.run([state.isDeleted, state.id]);
+        for (const itemId of missingIds) {
+          deleteEvents.run([itemId]);
+          deleteAdjustments.run([itemId]);
+          deleteItem.run([itemId]);
+        }
+      } finally {
+        updateState.free();
+        deleteEvents.free();
+        deleteAdjustments.free();
+        deleteItem.free();
+      }
+    });
+    return {
+      activeCount: states.filter((state) => !state.isDeleted).length,
+      trashedCount: states.filter((state) => state.isDeleted).length,
+      purgedCount: missingIds.length,
+    };
   }
 
   query(sql, params = []) {

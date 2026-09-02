@@ -132,6 +132,27 @@ test('separate plugin views do not overwrite each other\'s writes', () => {
   }
 });
 
+test('synchronizes trashed items and purges missing item history', () => {
+  const { database, directory } = fixture();
+  try {
+    database.recordUsage([item('active'), item('missing')]);
+    database.recordAdjustment([item('active')], 2);
+    const result = database.synchronizeItems([{ id: 'active', isDeleted: true }], ['missing']);
+
+    assert.equal(result.trashedCount, 1);
+    assert.equal(result.purgedCount, 1);
+    assert.deepEqual(database.getTrackedItemIds(), ['active']);
+    assert.equal(database.getStats().event_count, 0);
+    assert.equal(database.getCounts(['active']).get('active').usage_count, 3);
+
+    database.synchronizeItems([{ id: 'active', isDeleted: false }], []);
+    assert.equal(database.getStats().event_count, 3);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('migrates a version 1 schema without losing usage events', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'eagle-usage-counter-'));
   const filePath = path.join(directory, 'usage.sqlite');
@@ -156,7 +177,7 @@ test('migrates a version 1 schema without losing usage events', () => {
     legacy.close();
 
     const migrated = new UsageDatabase(SQL, filePath);
-    assert.equal(migrated.query('PRAGMA user_version')[0].user_version, 2);
+    assert.equal(migrated.query('PRAGMA user_version')[0].user_version, 3);
     assert.equal(migrated.getCounts(['legacy']).get('legacy').usage_count, 1);
     assert.equal(migrated.query('SELECT recorded_at FROM usage_events')[0].recorded_at, 1000);
     migrated.close();

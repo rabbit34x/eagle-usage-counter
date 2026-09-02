@@ -13,7 +13,10 @@
         <p class="eyebrow">EAGLE LOCAL HISTORY</p>
         <h1>Usage Counter</h1>
       </div>
-      <button id="refresh-button" class="button" type="button">更新</button>
+      <div class="header-actions">
+        <button id="cleanup-button" class="button secondary" type="button">孤立データを整理</button>
+        <button id="refresh-button" class="button" type="button">更新</button>
+      </div>
     </header>
 
     <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -100,7 +103,7 @@
       <p id="empty-ranking" class="empty">この期間の使用記録はありません。</p>
     </section>
 
-    <footer><span id="library-name"></span><span>閲覧専用</span></footer>
+    <footer><span id="library-name"></span><span>集計・データ管理</span></footer>
   </main>
   <script src="js/plugin.js"></script>
 </body>

@@ -9,7 +9,7 @@ let pluginPath;
 const DAY = 86_400_000;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const elements = Object.fromEntries([
-  'refresh-button', 'status', 'range-select', 'custom-range', 'start-date', 'end-date',
+  'refresh-button', 'cleanup-button', 'status', 'range-select', 'custom-range', 'start-date', 'end-date',
   'metric-select', 'granularity-select', 'event-count', 'event-delta', 'item-count',
   'item-delta', 'active-days', 'active-delta', 'daily-average', 'average-delta',
   'trend-note', 'trend-chart', 'empty-trend', 'weekday-chart', 'activity-total',
@@ -366,6 +366,58 @@ function renderRanking(range) {
   elements['empty-ranking'].hidden = ranking.length > 0;
 }
 
+async function cleanupOrphanedData() {
+  if (!database || elements['cleanup-button'].disabled) return;
+  elements['cleanup-button'].disabled = true;
+  elements.status.textContent = 'Eagleライブラリと照合しています…';
+  try {
+    const trackedIds = database.getTrackedItemIds();
+    if (trackedIds.length === 0) {
+      elements.status.textContent = '整理対象のデータはありません。';
+      return;
+    }
+
+    const existingItems = [];
+    const batchSize = 200;
+    for (let index = 0; index < trackedIds.length; index += batchSize) {
+      const batch = trackedIds.slice(index, index + batchSize);
+      const items = await eagle.item.getByIds(batch);
+      existingItems.push(...items.filter(Boolean));
+    }
+    const existingIds = new Set(existingItems.map((item) => item.id));
+    const missingIds = trackedIds.filter((itemId) => !existingIds.has(itemId));
+    const trashedCount = existingItems.filter((item) => item.isDeleted).length;
+
+    if (missingIds.length > 0 || trashedCount > 0) {
+      const confirmation = await eagle.dialog.showMessageBox({
+        type: 'warning',
+        title: '孤立データを整理',
+        message: 'Eagleライブラリとの照合結果',
+        detail: [
+          `完全に削除された画像: ${missingIds.length}件（履歴をDBから削除）`,
+          `ゴミ箱内の画像: ${trashedCount}件（履歴を保持して集計から除外）`,
+          '',
+          'DBから削除した履歴は元に戻せません。',
+        ].join('\n'),
+        buttons: ['整理する', 'キャンセル'],
+      });
+      if (confirmation.response !== 0) {
+        elements.status.textContent = '整理をキャンセルしました。';
+        return;
+      }
+    }
+
+    const result = database.synchronizeItems(existingItems, missingIds);
+    refresh();
+    elements.status.textContent = `整理完了: ${result.purgedCount}件削除、${result.trashedCount}件を集計対象外にしました。`;
+  } catch (error) {
+    console.error(error);
+    elements.status.textContent = `整理に失敗しました。DBは変更していません: ${error.message}`;
+  } finally {
+    elements['cleanup-button'].disabled = false;
+  }
+}
+
 function refresh() {
   if (!database) return;
   try {
@@ -404,6 +456,7 @@ function initializeFilters() {
 
 initializeFilters();
 elements['refresh-button'].addEventListener('click', refresh);
+elements['cleanup-button'].addEventListener('click', cleanupOrphanedData);
 
 eagle.onPluginCreate(async (plugin) => {
   pluginPath = plugin.path;
