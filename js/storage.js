@@ -32,20 +32,36 @@ function getLegacyDatabasePath(libraryPath) {
   );
 }
 
-function getSidecarDatabasePath(libraryPath) {
+function getPreviousSidecarDatabasePath(libraryPath) {
   const normalizedPath = path.resolve(libraryPath).normalize();
   const sidecarName = `${path.basename(normalizedPath)}.usage-counter`;
   return path.join(path.dirname(normalizedPath), sidecarName, 'usage.sqlite');
 }
 
+function getSidecarDatabasePath(libraryPath) {
+  const normalizedPath = path.resolve(libraryPath).normalize();
+  const dataRootName = `${path.basename(normalizedPath)}.plugin-data`;
+  return path.join(
+    path.dirname(normalizedPath),
+    dataRootName,
+    'sqlite',
+    'usage-counter',
+    'usage.sqlite',
+  );
+}
+
 function getDatabasePath(libraryPath) {
   const destination = getSidecarDatabasePath(libraryPath);
-  const legacyDatabase = getLegacyDatabasePath(libraryPath);
+  const migrationSources = [
+    getPreviousSidecarDatabasePath(libraryPath),
+    getLegacyDatabasePath(libraryPath),
+  ];
+  const source = migrationSources.find((candidate) => fs.existsSync(candidate));
 
-  if (!fs.existsSync(destination) && fs.existsSync(legacyDatabase)) {
+  if (!fs.existsSync(destination) && source) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     try {
-      fs.copyFileSync(legacyDatabase, destination, fs.constants.COPYFILE_EXCL);
+      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
     }
@@ -56,6 +72,7 @@ function getDatabasePath(libraryPath) {
 module.exports = {
   getDatabasePath,
   getLegacyDatabasePath,
+  getPreviousSidecarDatabasePath,
   getSidecarDatabasePath,
   resolveUserDataPath,
 };
