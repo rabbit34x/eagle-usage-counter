@@ -56,7 +56,7 @@ function getRange() {
   if (preset === 'year') {
     return { since: new Date(today.getFullYear(), 0, 1).getTime(), until, label: '今年', comparable: true };
   }
-  if (preset === 'all') return { since: 0, until, label: '全期間', comparable: false };
+  if (preset === 'all') return { since: 0, until, label: '全期間（日時不明を含む）', comparable: false, includeUndated: true };
 
   const startValue = elements['start-date'].value;
   const endValue = elements['end-date'].value;
@@ -108,8 +108,11 @@ function renderSummary(range) {
   const previous = comparisonRange ? database.getPeriodStats(comparisonRange) : null;
   const currentDays = calendarDays(range, current.first_used_at);
   const previousDays = comparisonRange ? calendarDays(comparisonRange) : null;
-  const currentAverage = Number(current.event_count || 0) / currentDays;
-  const previousAverage = previous ? Number(previous.event_count || 0) / previousDays : null;
+  const currentDatedCount = Number(current.event_count || 0) - Number(current.undated_count || 0);
+  const currentAverage = currentDatedCount / currentDays;
+  const previousAverage = previous
+    ? (Number(previous.event_count || 0) - Number(previous.undated_count || 0)) / previousDays
+    : null;
 
   elements['event-count'].textContent = String(current.event_count || 0);
   elements['item-count'].textContent = String(current.item_count || 0);
@@ -191,7 +194,8 @@ function renderTrend(range, stats) {
 
   const labels = { day: '日別', week: '週別', month: '月別', year: '年別' };
   const metricLabel = metric === 'items' ? '使用画像数' : '使用回数';
-  elements['trend-note'].textContent = `${range.label}・${labels[granularity]}・${metricLabel}`;
+  const trendRangeLabel = range.includeUndated ? '全期間（日時不明を除く）' : range.label;
+  elements['trend-note'].textContent = `${trendRangeLabel}・${labels[granularity]}・${metricLabel}`;
   elements['trend-chart'].replaceChildren();
   elements['empty-trend'].hidden = rows.length > 0;
   if (buckets.length === 0 || rows.length === 0) return;
@@ -327,7 +331,10 @@ function renderRanking(range) {
     name.textContent = item.name || item.eagle_item_id;
     const detail = document.createElement('div');
     detail.className = 'item-detail';
-    detail.textContent = `最終使用: ${new Date(item.last_used_at).toLocaleString('ja-JP')}`;
+    const details = [];
+    if (item.last_used_at) details.push(`最終使用: ${new Date(item.last_used_at).toLocaleString('ja-JP')}`);
+    if (Number(item.undated_count) > 0) details.push(`日時不明: ${item.undated_count}回`);
+    detail.textContent = details.join(' / ') || '日時情報なし';
     copy.append(name, detail);
     const count = document.createElement('span');
     count.className = 'rank-count';

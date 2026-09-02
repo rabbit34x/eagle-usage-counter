@@ -17,8 +17,19 @@ button:hover:not(:disabled) { background: rgba(128,128,128,.25); }
 button:disabled { cursor: default; opacity: .35; }
 button.increment { border-color: #765bea; background: #765bea; color: white; }
 button.increment:hover:not(:disabled) { background: #8971ed; }
-.value { display: flex; align-items: baseline; justify-content: center; gap: 4px; }
+.value { display: grid; justify-items: center; gap: 2px; }
+.value > div { display: flex; align-items: baseline; justify-content: center; gap: 4px; }
 .value strong { font-size: 23px; line-height: 1; }
-.value span { color: #8b9099; }
-#message { height: 13px; margin: 5px 0 0; color: #6f9f7e; font-size: 10px; text-align: center; }
+.value span, .value small { color: #8b9099; }
+.value small { min-height: 10px; font-size: 9px; }
+#message { height: 13px; margin: 4px 0 0; color: #6f9f7e; font-size: 10px; text-align: center; }
 #message.error { color: #e26973; }
+.past-entry { margin-top: 5px; border-top: 1px solid rgba(128,128,128,.25); padding-top: 8px; }
+.past-entry > strong { display: block; margin-bottom: 6px; font-size: 10px; }
+.past-fields { display: grid; grid-template-columns: 62px 1fr; gap: 7px; }
+.past-fields label { display: grid; gap: 3px; color: #8b9099; font-size: 9px; }
+input { width: 100%; height: 26px; border: 1px solid rgba(128,128,128,.32); border-radius: 5px; padding: 0 6px; background: rgba(128,128,128,.12); color: inherit; font: inherit; }
+.past-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.checkbox { display: flex; align-items: center; gap: 5px; color: #8b9099; font-size: 10px; }
+.checkbox input { width: 13px; height: 13px; }
+button.add-past { width: 66px; height: 27px; border-color: #765bea; background: #765bea; color: white; font-size: 10px; }

@@ -18,7 +18,7 @@ class UsageDatabase {
 
   migrate() {
     const version = this.db.exec('PRAGMA user_version')[0]?.values[0]?.[0] ?? 0;
-    if (version > 1) throw new Error(`未対応のデータベースバージョンです: ${version}`);
+    if (version > 2) throw new Error(`未対応のデータベースバージョンです: ${version}`);
     if (version === 0) {
       this.db.run(`
         CREATE TABLE items (
@@ -34,17 +34,45 @@ class UsageDatabase {
           eagle_item_id TEXT NOT NULL,
           batch_id TEXT NOT NULL,
           used_at INTEGER NOT NULL,
+          recorded_at INTEGER NOT NULL,
           note TEXT NOT NULL DEFAULT '',
           reverted_at INTEGER,
           FOREIGN KEY (eagle_item_id) REFERENCES items(eagle_item_id)
         );
-        CREATE INDEX idx_usage_events_item_time
-          ON usage_events(eagle_item_id, used_at);
-        CREATE INDEX idx_usage_events_time
-          ON usage_events(used_at);
-        CREATE INDEX idx_usage_events_batch
-          ON usage_events(batch_id);
-        PRAGMA user_version = 1;
+        CREATE TABLE usage_adjustments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          eagle_item_id TEXT NOT NULL,
+          amount INTEGER NOT NULL CHECK(amount > 0),
+          created_at INTEGER NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          reverted_at INTEGER,
+          FOREIGN KEY (eagle_item_id) REFERENCES items(eagle_item_id)
+        );
+        CREATE INDEX idx_usage_events_item_time ON usage_events(eagle_item_id, used_at);
+        CREATE INDEX idx_usage_events_recorded ON usage_events(eagle_item_id, recorded_at);
+        CREATE INDEX idx_usage_events_time ON usage_events(used_at);
+        CREATE INDEX idx_usage_events_batch ON usage_events(batch_id);
+        CREATE INDEX idx_usage_adjustments_item ON usage_adjustments(eagle_item_id, created_at);
+        PRAGMA user_version = 2;
+      `);
+      return true;
+    }
+    if (version === 1) {
+      this.db.run(`
+        ALTER TABLE usage_events ADD COLUMN recorded_at INTEGER;
+        UPDATE usage_events SET recorded_at = used_at WHERE recorded_at IS NULL;
+        CREATE TABLE usage_adjustments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          eagle_item_id TEXT NOT NULL,
+          amount INTEGER NOT NULL CHECK(amount > 0),
+          created_at INTEGER NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          reverted_at INTEGER,
+          FOREIGN KEY (eagle_item_id) REFERENCES items(eagle_item_id)
+        );
+        CREATE INDEX idx_usage_events_recorded ON usage_events(eagle_item_id, recorded_at);
+        CREATE INDEX idx_usage_adjustments_item ON usage_adjustments(eagle_item_id, created_at);
+        PRAGMA user_version = 2;
       `);
       return true;
     }
@@ -70,45 +98,81 @@ class UsageDatabase {
     }
   }
 
-  recordUsage(items, note = '') {
+  recordUsage(items, { note = '', usedAt = Date.now(), repeat = 1 } = {}) {
     const uniqueItems = [...new Map(items.map((item) => [item.id, item])).values()];
+    const repetitions = Math.max(1, Math.trunc(repeat));
     if (uniqueItems.length === 0) return { batchId: null, count: 0 };
 
-    const now = Date.now();
+    const recordedAt = Date.now();
     const batchId = crypto.randomUUID();
     this.transaction(() => {
-      const upsert = this.db.prepare(`
-        INSERT INTO items (
-          eagle_item_id, name, extension, thumbnail_url, first_seen_at, last_seen_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(eagle_item_id) DO UPDATE SET
-          name = excluded.name,
-          extension = excluded.extension,
-          thumbnail_url = excluded.thumbnail_url,
-          last_seen_at = excluded.last_seen_at
-      `);
+      const upsert = this.prepareItemUpsert();
       const insertEvent = this.db.prepare(`
-        INSERT INTO usage_events (eagle_item_id, batch_id, used_at, note)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO usage_events (eagle_item_id, batch_id, used_at, recorded_at, note)
+        VALUES (?, ?, ?, ?, ?)
       `);
       try {
         for (const item of uniqueItems) {
-          upsert.run([
-            item.id,
-            item.name || '',
-            item.ext || '',
-            item.thumbnailURL || '',
-            now,
-            now,
-          ]);
-          insertEvent.run([item.id, batchId, now, note]);
+          this.upsertItem(upsert, item, recordedAt);
+          for (let index = 0; index < repetitions; index += 1) {
+            insertEvent.run([item.id, batchId, usedAt, recordedAt, note]);
+          }
         }
       } finally {
         upsert.free();
         insertEvent.free();
       }
     });
-    return { batchId, count: uniqueItems.length };
+    return { batchId, count: uniqueItems.length * repetitions };
+  }
+
+  recordAdjustment(items, amount, note = '') {
+    const uniqueItems = [...new Map(items.map((item) => [item.id, item])).values()];
+    const adjustment = Math.trunc(amount);
+    if (uniqueItems.length === 0 || adjustment < 1) return { count: 0 };
+
+    const now = Date.now();
+    this.transaction(() => {
+      const upsert = this.prepareItemUpsert();
+      const insertAdjustment = this.db.prepare(`
+        INSERT INTO usage_adjustments (eagle_item_id, amount, created_at, note)
+        VALUES (?, ?, ?, ?)
+      `);
+      try {
+        for (const item of uniqueItems) {
+          this.upsertItem(upsert, item, now);
+          insertAdjustment.run([item.id, adjustment, now, note]);
+        }
+      } finally {
+        upsert.free();
+        insertAdjustment.free();
+      }
+    });
+    return { count: uniqueItems.length * adjustment };
+  }
+
+  prepareItemUpsert() {
+    return this.db.prepare(`
+      INSERT INTO items (
+        eagle_item_id, name, extension, thumbnail_url, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(eagle_item_id) DO UPDATE SET
+        name = excluded.name,
+        extension = excluded.extension,
+        thumbnail_url = excluded.thumbnail_url,
+        last_seen_at = excluded.last_seen_at
+    `);
+  }
+
+  upsertItem(statement, item, timestamp) {
+    statement.run([
+      item.id,
+      item.name || '',
+      item.ext || '',
+      item.thumbnailURL || '',
+      timestamp,
+      timestamp,
+    ]);
   }
 
   decrementUsage(itemIds) {
@@ -118,24 +182,43 @@ class UsageDatabase {
     let count = 0;
     this.transaction(() => {
       const findLatest = this.db.prepare(`
-        SELECT id FROM usage_events
-        WHERE eagle_item_id = ? AND reverted_at IS NULL
-        ORDER BY used_at DESC, id DESC
+        SELECT operation_id, operation_type, recorded_at FROM (
+          SELECT id AS operation_id, 'event' AS operation_type, recorded_at
+          FROM usage_events
+          WHERE eagle_item_id = ? AND reverted_at IS NULL
+          UNION ALL
+          SELECT id AS operation_id, 'adjustment' AS operation_type, created_at AS recorded_at
+          FROM usage_adjustments
+          WHERE eagle_item_id = ? AND reverted_at IS NULL AND amount > 0
+        )
+        ORDER BY recorded_at DESC, operation_id DESC
         LIMIT 1
       `);
-      const revert = this.db.prepare('UPDATE usage_events SET reverted_at = ? WHERE id = ?');
+      const revertEvent = this.db.prepare('UPDATE usage_events SET reverted_at = ? WHERE id = ?');
+      const decrementAdjustment = this.db.prepare(`
+        UPDATE usage_adjustments
+        SET amount = CASE WHEN amount > 1 THEN amount - 1 ELSE amount END,
+            reverted_at = CASE WHEN amount = 1 THEN ? ELSE reverted_at END
+        WHERE id = ?
+      `);
       try {
         for (const itemId of uniqueIds) {
-          findLatest.bind([itemId]);
+          findLatest.bind([itemId, itemId]);
           if (findLatest.step()) {
-            revert.run([Date.now(), findLatest.getAsObject().id]);
+            const operation = findLatest.getAsObject();
+            if (operation.operation_type === 'event') {
+              revertEvent.run([Date.now(), operation.operation_id]);
+            } else {
+              decrementAdjustment.run([Date.now(), operation.operation_id]);
+            }
             count += 1;
           }
           findLatest.reset();
         }
       } finally {
         findLatest.free();
-        revert.free();
+        revertEvent.free();
+        decrementAdjustment.free();
       }
     });
     return { count };
@@ -145,11 +228,25 @@ class UsageDatabase {
     if (itemIds.length === 0) return new Map();
     const placeholders = itemIds.map(() => '?').join(',');
     const rows = this.query(`
-      SELECT eagle_item_id, COUNT(*) AS usage_count, MAX(used_at) AS last_used_at
-      FROM usage_events
-      WHERE reverted_at IS NULL AND eagle_item_id IN (${placeholders})
+      SELECT eagle_item_id,
+             SUM(usage_count) AS usage_count,
+             SUM(undated_count) AS undated_count,
+             MAX(last_used_at) AS last_used_at
+      FROM (
+        SELECT eagle_item_id, COUNT(*) AS usage_count, 0 AS undated_count,
+               MAX(used_at) AS last_used_at
+        FROM usage_events
+        WHERE reverted_at IS NULL AND eagle_item_id IN (${placeholders})
+        GROUP BY eagle_item_id
+        UNION ALL
+        SELECT eagle_item_id, SUM(amount) AS usage_count, SUM(amount) AS undated_count,
+               NULL AS last_used_at
+        FROM usage_adjustments
+        WHERE reverted_at IS NULL AND eagle_item_id IN (${placeholders})
+        GROUP BY eagle_item_id
+      )
       GROUP BY eagle_item_id
-    `, itemIds);
+    `, [...itemIds, ...itemIds]);
     return new Map(rows.map((row) => [row.eagle_item_id, row]));
   }
 
@@ -164,16 +261,28 @@ class UsageDatabase {
     `, [since ?? 0, until]);
   }
 
-  getPeriodStats({ since = 0, until = Date.now() } = {}) {
+  getPeriodStats({ since = 0, until = Date.now(), includeUndated = false } = {}) {
     return this.query(`
-      SELECT COUNT(*) AS event_count,
-             COUNT(DISTINCT eagle_item_id) AS item_count,
-             COUNT(DISTINCT strftime('%Y-%m-%d', used_at / 1000, 'unixepoch', 'localtime')) AS active_days,
-             MIN(used_at) AS first_used_at,
-             MAX(used_at) AS last_used_at
-      FROM usage_events
-      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
-    `, [since, until])[0];
+      WITH dated AS (
+        SELECT eagle_item_id, used_at
+        FROM usage_events
+        WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+      ), undated AS (
+        SELECT eagle_item_id, amount
+        FROM usage_adjustments
+        WHERE reverted_at IS NULL AND ? = 1
+      )
+      SELECT (SELECT COUNT(*) FROM dated) + COALESCE((SELECT SUM(amount) FROM undated), 0) AS event_count,
+             (SELECT COUNT(*) FROM (
+                SELECT eagle_item_id FROM dated
+                UNION
+                SELECT eagle_item_id FROM undated
+              )) AS item_count,
+             (SELECT COUNT(DISTINCT strftime('%Y-%m-%d', used_at / 1000, 'unixepoch', 'localtime')) FROM dated) AS active_days,
+             (SELECT MIN(used_at) FROM dated) AS first_used_at,
+             (SELECT MAX(used_at) FROM dated) AS last_used_at,
+             COALESCE((SELECT SUM(amount) FROM undated), 0) AS undated_count
+    `, [since, until, includeUndated ? 1 : 0])[0];
   }
 
   getTimeSeries({ since = 0, until = Date.now(), granularity = 'day' } = {}) {
@@ -208,21 +317,35 @@ class UsageDatabase {
     `, [since, until]);
   }
 
-  getRanking({ since = 0, until = Date.now(), limit = 100 } = {}) {
+  getRanking({ since = 0, until = Date.now(), includeUndated = false, limit = 100 } = {}) {
     return this.query(`
+      WITH totals AS (
+        SELECT eagle_item_id, COUNT(*) AS usage_count, 0 AS undated_count,
+               MAX(used_at) AS last_used_at
+        FROM usage_events
+        WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+        GROUP BY eagle_item_id
+        UNION ALL
+        SELECT eagle_item_id, SUM(amount) AS usage_count, SUM(amount) AS undated_count,
+               NULL AS last_used_at
+        FROM usage_adjustments
+        WHERE reverted_at IS NULL AND ? = 1
+        GROUP BY eagle_item_id
+      )
       SELECT i.eagle_item_id, i.name, i.extension, i.thumbnail_url,
-             COUNT(*) AS usage_count, MAX(e.used_at) AS last_used_at
-      FROM usage_events e
-      JOIN items i ON i.eagle_item_id = e.eagle_item_id
-      WHERE e.reverted_at IS NULL AND e.used_at >= ? AND e.used_at <= ?
-      GROUP BY e.eagle_item_id
+             SUM(t.usage_count) AS usage_count,
+             SUM(t.undated_count) AS undated_count,
+             MAX(t.last_used_at) AS last_used_at
+      FROM totals t
+      JOIN items i ON i.eagle_item_id = t.eagle_item_id
+      GROUP BY t.eagle_item_id
       ORDER BY usage_count DESC, last_used_at DESC
       LIMIT ?
-    `, [since, until, limit]);
+    `, [since, until, includeUndated ? 1 : 0, limit]);
   }
 
   getStats() {
-    return this.getPeriodStats();
+    return this.getPeriodStats({ includeUndated: true });
   }
 
   query(sql, params = []) {

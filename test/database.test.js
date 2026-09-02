@@ -72,6 +72,31 @@ test('aggregates period statistics, time series, and weekdays', () => {
   }
 });
 
+test('undated adjustments affect totals but not time-based statistics', () => {
+  const { database, directory } = fixture();
+  try {
+    database.recordUsage([item('a')]);
+    database.recordAdjustment([item('a'), item('b')], 5);
+
+    assert.equal(database.getCounts(['a']).get('a').usage_count, 6);
+    assert.equal(database.getCounts(['a']).get('a').undated_count, 5);
+    assert.equal(database.getPeriodStats().event_count, 1);
+    const allStats = database.getPeriodStats({ includeUndated: true });
+    assert.equal(allStats.event_count, 11);
+    assert.equal(allStats.item_count, 2);
+    assert.equal(allStats.undated_count, 10);
+    assert.deepEqual(database.getRanking({ includeUndated: true }).map((row) => row.usage_count), [6, 5]);
+    assert.equal(database.getDailyActivity().reduce((sum, row) => sum + row.usage_count, 0), 1);
+
+    database.decrementUsage(['a', 'b']);
+    assert.equal(database.getCounts(['a']).get('a').undated_count, 4);
+    assert.equal(database.getCounts(['b']).get('b').undated_count, 4);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('decrement reverts the latest event for each selected item', () => {
   const { database, directory } = fixture();
   try {
@@ -102,6 +127,39 @@ test('separate plugin views do not overwrite each other\'s writes', () => {
     assert.equal(dashboard.getStats().event_count, 2);
     inspector.close();
     dashboard.close();
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('migrates a version 1 schema without losing usage events', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'eagle-usage-counter-'));
+  const filePath = path.join(directory, 'usage.sqlite');
+  try {
+    const legacy = new SQL.Database();
+    legacy.run(`
+      CREATE TABLE items (
+        eagle_item_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
+        extension TEXT NOT NULL DEFAULT '', thumbnail_url TEXT NOT NULL DEFAULT '',
+        first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL
+      );
+      CREATE TABLE usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, eagle_item_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL, used_at INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '',
+        reverted_at INTEGER
+      );
+      INSERT INTO items VALUES ('legacy', 'Legacy', 'png', '', 1, 1);
+      INSERT INTO usage_events (eagle_item_id, batch_id, used_at) VALUES ('legacy', 'batch', 1000);
+      PRAGMA user_version = 1;
+    `);
+    fs.writeFileSync(filePath, Buffer.from(legacy.export()));
+    legacy.close();
+
+    const migrated = new UsageDatabase(SQL, filePath);
+    assert.equal(migrated.query('PRAGMA user_version')[0].user_version, 2);
+    assert.equal(migrated.getCounts(['legacy']).get('legacy').usage_count, 1);
+    assert.equal(migrated.query('SELECT recorded_at FROM usage_events')[0].recorded_at, 1000);
+    migrated.close();
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
