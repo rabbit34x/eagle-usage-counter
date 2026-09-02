@@ -164,29 +164,65 @@ class UsageDatabase {
     `, [since ?? 0, until]);
   }
 
-  getRanking({ since = null, limit = 100 } = {}) {
-    const condition = since == null ? '' : 'AND e.used_at >= ?';
-    const params = since == null ? [limit] : [since, limit];
+  getPeriodStats({ since = 0, until = Date.now() } = {}) {
+    return this.query(`
+      SELECT COUNT(*) AS event_count,
+             COUNT(DISTINCT eagle_item_id) AS item_count,
+             COUNT(DISTINCT strftime('%Y-%m-%d', used_at / 1000, 'unixepoch', 'localtime')) AS active_days,
+             MIN(used_at) AS first_used_at,
+             MAX(used_at) AS last_used_at
+      FROM usage_events
+      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+    `, [since, until])[0];
+  }
+
+  getTimeSeries({ since = 0, until = Date.now(), granularity = 'day' } = {}) {
+    const bucketExpressions = {
+      day: "strftime('%Y-%m-%d', used_at / 1000, 'unixepoch', 'localtime')",
+      week: "date(used_at / 1000, 'unixepoch', 'localtime', 'weekday 0', '-6 days')",
+      month: "strftime('%Y-%m', used_at / 1000, 'unixepoch', 'localtime')",
+      year: "strftime('%Y', used_at / 1000, 'unixepoch', 'localtime')",
+    };
+    const bucket = bucketExpressions[granularity];
+    if (!bucket) throw new Error(`未対応の集計単位です: ${granularity}`);
+    return this.query(`
+      SELECT ${bucket} AS bucket,
+             COUNT(*) AS usage_count,
+             COUNT(DISTINCT eagle_item_id) AS item_count
+      FROM usage_events
+      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+      GROUP BY bucket
+      ORDER BY bucket
+    `, [since, until]);
+  }
+
+  getWeekdayStats({ since = 0, until = Date.now() } = {}) {
+    return this.query(`
+      SELECT CAST(strftime('%w', used_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS weekday,
+             COUNT(*) AS usage_count,
+             COUNT(DISTINCT eagle_item_id) AS item_count
+      FROM usage_events
+      WHERE reverted_at IS NULL AND used_at >= ? AND used_at <= ?
+      GROUP BY weekday
+      ORDER BY weekday
+    `, [since, until]);
+  }
+
+  getRanking({ since = 0, until = Date.now(), limit = 100 } = {}) {
     return this.query(`
       SELECT i.eagle_item_id, i.name, i.extension, i.thumbnail_url,
              COUNT(*) AS usage_count, MAX(e.used_at) AS last_used_at
       FROM usage_events e
       JOIN items i ON i.eagle_item_id = e.eagle_item_id
-      WHERE e.reverted_at IS NULL ${condition}
+      WHERE e.reverted_at IS NULL AND e.used_at >= ? AND e.used_at <= ?
       GROUP BY e.eagle_item_id
       ORDER BY usage_count DESC, last_used_at DESC
       LIMIT ?
-    `, params);
+    `, [since, until, limit]);
   }
 
   getStats() {
-    return this.query(`
-      SELECT COUNT(*) AS event_count,
-             COUNT(DISTINCT eagle_item_id) AS item_count,
-             MAX(used_at) AS last_used_at
-      FROM usage_events
-      WHERE reverted_at IS NULL
-    `)[0];
+    return this.getPeriodStats();
   }
 
   query(sql, params = []) {

@@ -25,11 +25,10 @@ test('records one event per unique selected item and ranks items', () => {
     database.recordUsage([item('a', 'Alpha'), item('a', 'Alpha'), item('b', 'Beta')]);
     database.recordUsage([item('a', 'Alpha')]);
 
-    assert.deepEqual(database.getStats(), {
-      event_count: 3,
-      item_count: 2,
-      last_used_at: database.getStats().last_used_at,
-    });
+    const stats = database.getStats();
+    assert.equal(stats.event_count, 3);
+    assert.equal(stats.item_count, 2);
+    assert.ok(stats.last_used_at);
     const ranking = database.getRanking();
     assert.equal(ranking[0].eagle_item_id, 'a');
     assert.equal(ranking[0].usage_count, 2);
@@ -37,6 +36,36 @@ test('records one event per unique selected item and ranks items', () => {
     const activity = database.getDailyActivity({ since: Date.now() - 60_000 });
     assert.equal(activity.length, 1);
     assert.equal(activity[0].usage_count, 3);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('aggregates period statistics, time series, and weekdays', () => {
+  const { database, directory } = fixture();
+  try {
+    database.recordUsage([item('a'), item('b')]);
+    database.recordUsage([item('a')]);
+    const monday = new Date(2025, 0, 6, 10).getTime();
+    const tuesday = new Date(2025, 0, 7, 11).getTime();
+    database.transaction(() => {
+      database.db.run('UPDATE usage_events SET used_at = ? WHERE id IN (1, 2)', [monday]);
+      database.db.run('UPDATE usage_events SET used_at = ? WHERE id = 3', [tuesday]);
+    });
+    const range = {
+      since: new Date(2025, 0, 6).getTime(),
+      until: new Date(2025, 0, 12, 23, 59, 59, 999).getTime(),
+    };
+
+    const stats = database.getPeriodStats(range);
+    assert.equal(stats.event_count, 3);
+    assert.equal(stats.item_count, 2);
+    assert.equal(stats.active_days, 2);
+    const series = database.getTimeSeries({ ...range, granularity: 'day' });
+    assert.deepEqual(series.map((row) => [row.usage_count, row.item_count]), [[2, 2], [1, 1]]);
+    const weekdays = database.getWeekdayStats(range);
+    assert.deepEqual(weekdays.map((row) => [row.weekday, row.usage_count]), [[1, 2], [2, 1]]);
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });

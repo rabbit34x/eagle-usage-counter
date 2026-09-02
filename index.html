@@ -18,18 +18,65 @@
 
     <div id="status" class="status" role="status" aria-live="polite"></div>
 
+    <section class="filter-panel" aria-label="集計条件">
+      <label>期間
+        <select id="range-select">
+          <option value="7">過去7日</option>
+          <option value="30" selected>過去30日</option>
+          <option value="today">今日</option>
+          <option value="month">今月</option>
+          <option value="year">今年</option>
+          <option value="all">全期間</option>
+          <option value="custom">期間を指定</option>
+        </select>
+      </label>
+      <div id="custom-range" class="custom-range" hidden>
+        <label>開始日<input id="start-date" type="date"></label>
+        <span>〜</span>
+        <label>終了日<input id="end-date" type="date"></label>
+      </div>
+      <label>グラフ
+        <select id="metric-select">
+          <option value="usage">使用回数</option>
+          <option value="items">使用画像数</option>
+        </select>
+      </label>
+      <label>集計単位
+        <select id="granularity-select">
+          <option value="auto">自動</option>
+          <option value="day">日</option>
+          <option value="week">週</option>
+          <option value="month">月</option>
+          <option value="year">年</option>
+        </select>
+      </label>
+    </section>
+
     <section class="summary">
-      <div><span class="label">使用記録</span><strong id="event-count">0</strong></div>
-      <div><span class="label">使用画像</span><strong id="item-count">0</strong></div>
-      <div><span class="label">最終記録</span><strong id="last-used">—</strong></div>
+      <article><span class="label">使用回数</span><strong id="event-count">0</strong><small id="event-delta">—</small></article>
+      <article><span class="label">使用画像</span><strong id="item-count">0</strong><small id="item-delta">—</small></article>
+      <article><span class="label">活動日数</span><strong id="active-days">0</strong><small id="active-delta">—</small></article>
+      <article><span class="label">1日平均</span><strong id="daily-average">0</strong><small id="average-delta">—</small></article>
+    </section>
+
+    <section class="analytics-section">
+      <div class="section-header">
+        <div><h2>期間別推移</h2><p id="trend-note" class="section-note"></p></div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="trend-chart" class="trend-chart" viewBox="0 0 820 250" role="img" aria-label="期間別推移グラフ"></svg>
+        <p id="empty-trend" class="empty chart-empty">この期間の記録はありません。</p>
+      </div>
+    </section>
+
+    <section class="analytics-section weekday-section">
+      <div class="section-header"><div><h2>曜日別傾向</h2><p class="section-note">選択期間の分布</p></div></div>
+      <div id="weekday-chart" class="weekday-chart"></div>
     </section>
 
     <section class="activity-section">
       <div class="section-header">
-        <div>
-          <h2>使用アクティビティ</h2>
-          <p id="activity-total" class="section-note">過去1年間</p>
-        </div>
+        <div><h2>年間アクティビティ</h2><p id="activity-total" class="section-note">過去1年間</p></div>
         <div class="legend" aria-label="使用回数の凡例">
           <span>少ない</span>
           <i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i>
@@ -48,17 +95,9 @@
     </section>
 
     <section class="ranking-section">
-      <div class="section-header">
-        <h2>ランキング</h2>
-        <select id="period-select" aria-label="集計期間">
-          <option value="all">全期間</option>
-          <option value="30">過去30日</option>
-          <option value="7">過去7日</option>
-          <option value="1">今日</option>
-        </select>
-      </div>
+      <div class="section-header"><div><h2>ランキング</h2><p id="ranking-note" class="section-note"></p></div></div>
       <ol id="ranking" class="ranking"></ol>
-      <p id="empty-ranking" class="empty">まだ使用記録がありません。</p>
+      <p id="empty-ranking" class="empty">この期間の使用記録はありません。</p>
     </section>
 
     <footer><span id="library-name"></span><span>閲覧専用</span></footer>
