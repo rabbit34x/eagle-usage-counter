@@ -40,23 +40,6 @@ test('records one event per unique selected item and ranks items', () => {
   }
 });
 
-test('undo reverts the whole latest batch without deleting audit rows', () => {
-  const { database, directory } = fixture();
-  try {
-    database.recordUsage([item('a')]);
-    database.recordUsage([item('a'), item('b')]);
-    const undone = database.undoLastBatch();
-
-    assert.equal(undone.count, 2);
-    assert.equal(database.getStats().event_count, 1);
-    assert.equal(database.query('SELECT COUNT(*) AS count FROM usage_events')[0].count, 3);
-    assert.equal(database.query('SELECT COUNT(*) AS count FROM usage_events WHERE reverted_at IS NOT NULL')[0].count, 2);
-  } finally {
-    database.close();
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
-
 test('decrement reverts the latest event for each selected item', () => {
   const { database, directory } = fixture();
   try {
@@ -108,20 +91,3 @@ test('persists and reopens the sqlite file', () => {
   }
 });
 
-test('restore replaces the current database', () => {
-  const source = fixture();
-  const target = fixture();
-  try {
-    source.database.recordUsage([item('source')]);
-    target.database.recordUsage([item('target'), item('other')]);
-    target.database.replace(source.database.exportBytes());
-
-    assert.equal(target.database.getStats().event_count, 1);
-    assert.equal(target.database.getRanking()[0].eagle_item_id, 'source');
-  } finally {
-    source.database.close();
-    target.database.close();
-    fs.rmSync(source.directory, { recursive: true, force: true });
-    fs.rmSync(target.directory, { recursive: true, force: true });
-  }
-});

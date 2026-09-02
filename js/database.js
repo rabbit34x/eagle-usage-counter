@@ -111,27 +111,6 @@ class UsageDatabase {
     return { batchId, count: uniqueItems.length };
   }
 
-  undoLastBatch() {
-    const rows = this.query(`
-      SELECT batch_id, MAX(used_at) AS used_at, COUNT(*) AS event_count
-      FROM usage_events
-      WHERE reverted_at IS NULL
-      GROUP BY batch_id
-      ORDER BY used_at DESC, MAX(id) DESC
-      LIMIT 1
-    `);
-    if (rows.length === 0) return null;
-
-    const batch = rows[0];
-    this.transaction(() => {
-      this.db.run(
-        'UPDATE usage_events SET reverted_at = ? WHERE batch_id = ? AND reverted_at IS NULL',
-        [Date.now(), batch.batch_id],
-      );
-    });
-    return { batchId: batch.batch_id, count: batch.event_count };
-  }
-
   decrementUsage(itemIds) {
     const uniqueIds = [...new Set(itemIds)];
     if (uniqueIds.length === 0) return { count: 0 };
@@ -210,30 +189,6 @@ class UsageDatabase {
       statement.free();
     }
     return rows;
-  }
-
-  exportBytes() {
-    this.reload(true);
-    return Buffer.from(this.db.export());
-  }
-
-  replace(bytes) {
-    const releaseLock = this.acquireLock();
-    const oldDatabase = this.db;
-    const replacement = new this.SQL.Database(bytes);
-    try {
-      replacement.run('PRAGMA foreign_keys = ON');
-      this.db = replacement;
-      this.migrate();
-      this.persist();
-      oldDatabase.close();
-    } catch (error) {
-      replacement.close();
-      this.db = oldDatabase;
-      throw error;
-    } finally {
-      releaseLock();
-    }
   }
 
   getFileSignature() {
