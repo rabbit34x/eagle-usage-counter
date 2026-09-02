@@ -1,0 +1,24 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; overflow: hidden; background: transparent; }
+body { color: #222; }
+body[theme="GRAY"], body[theme="BLUE"], body[theme="PURPLE"], body[theme="DARK"] { color: #f4f5f8; }
+.counter { padding: 10px 12px 8px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+header strong { font-size: 11px; }
+header span { overflow: hidden; color: #8b9099; text-overflow: ellipsis; white-space: nowrap; }
+.controls { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; gap: 8px; margin-top: 9px; }
+button { height: 30px; border: 1px solid rgba(128,128,128,.32); border-radius: 6px; background: rgba(128,128,128,.14); color: inherit; font-size: 18px; font-weight: 700; cursor: pointer; }
+button:hover:not(:disabled) { background: rgba(128,128,128,.25); }
+button:disabled { cursor: default; opacity: .35; }
+button.increment { border-color: #765bea; background: #765bea; color: white; }
+button.increment:hover:not(:disabled) { background: #8971ed; }
+.value { display: flex; align-items: baseline; justify-content: center; gap: 4px; }
+.value strong { font-size: 23px; line-height: 1; }
+.value span { color: #8b9099; }
+#message { height: 13px; margin: 5px 0 0; color: #6f9f7e; font-size: 10px; text-align: center; }
+#message.error { color: #e26973; }

@@ -11,8 +11,9 @@ class UsageDatabase {
     const bytes = fs.existsSync(filePath) ? fs.readFileSync(filePath) : undefined;
     this.db = bytes ? new SQL.Database(bytes) : new SQL.Database();
     this.db.run('PRAGMA foreign_keys = ON');
-    this.migrate();
-    if (!bytes) this.persist();
+    const migrated = this.migrate();
+    this.fileSignature = this.getFileSignature();
+    if (!bytes || migrated) this.persist();
   }
 
   migrate() {
@@ -45,19 +46,27 @@ class UsageDatabase {
           ON usage_events(batch_id);
         PRAGMA user_version = 1;
       `);
+      return true;
     }
+    return false;
   }
 
   transaction(action) {
-    this.db.run('BEGIN IMMEDIATE');
+    const releaseLock = this.acquireLock();
     try {
-      const result = action();
-      this.db.run('COMMIT');
-      this.persist();
-      return result;
-    } catch (error) {
-      this.db.run('ROLLBACK');
-      throw error;
+      this.reload(true);
+      this.db.run('BEGIN IMMEDIATE');
+      try {
+        const result = action();
+        this.db.run('COMMIT');
+        this.persist();
+        return result;
+      } catch (error) {
+        this.db.run('ROLLBACK');
+        throw error;
+      }
+    } finally {
+      releaseLock();
     }
   }
 
@@ -123,6 +132,36 @@ class UsageDatabase {
     return { batchId: batch.batch_id, count: batch.event_count };
   }
 
+  decrementUsage(itemIds) {
+    const uniqueIds = [...new Set(itemIds)];
+    if (uniqueIds.length === 0) return { count: 0 };
+
+    let count = 0;
+    this.transaction(() => {
+      const findLatest = this.db.prepare(`
+        SELECT id FROM usage_events
+        WHERE eagle_item_id = ? AND reverted_at IS NULL
+        ORDER BY used_at DESC, id DESC
+        LIMIT 1
+      `);
+      const revert = this.db.prepare('UPDATE usage_events SET reverted_at = ? WHERE id = ?');
+      try {
+        for (const itemId of uniqueIds) {
+          findLatest.bind([itemId]);
+          if (findLatest.step()) {
+            revert.run([Date.now(), findLatest.getAsObject().id]);
+            count += 1;
+          }
+          findLatest.reset();
+        }
+      } finally {
+        findLatest.free();
+        revert.free();
+      }
+    });
+    return { count };
+  }
+
   getCounts(itemIds) {
     if (itemIds.length === 0) return new Map();
     const placeholders = itemIds.map(() => '?').join(',');
@@ -161,6 +200,7 @@ class UsageDatabase {
   }
 
   query(sql, params = []) {
+    this.reload(true);
     const statement = this.db.prepare(sql);
     const rows = [];
     try {
@@ -173,21 +213,78 @@ class UsageDatabase {
   }
 
   exportBytes() {
+    this.reload(true);
     return Buffer.from(this.db.export());
   }
 
   replace(bytes) {
+    const releaseLock = this.acquireLock();
+    const oldDatabase = this.db;
     const replacement = new this.SQL.Database(bytes);
+    try {
+      replacement.run('PRAGMA foreign_keys = ON');
+      this.db = replacement;
+      this.migrate();
+      this.persist();
+      oldDatabase.close();
+    } catch (error) {
+      replacement.close();
+      this.db = oldDatabase;
+      throw error;
+    } finally {
+      releaseLock();
+    }
+  }
+
+  getFileSignature() {
+    try {
+      const stats = fs.statSync(this.filePath);
+      return `${stats.mtimeMs}:${stats.size}`;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  reload(force = false) {
+    const signature = this.getFileSignature();
+    if (!signature || (!force && signature === this.fileSignature)) return;
+    const replacement = new this.SQL.Database(fs.readFileSync(this.filePath));
     replacement.run('PRAGMA foreign_keys = ON');
-    this.db.close();
+    const oldDatabase = this.db;
     this.db = replacement;
-    this.migrate();
-    this.persist();
+    this.fileSignature = signature;
+    oldDatabase.close();
+  }
+
+  acquireLock() {
+    const lockPath = `${this.filePath}.lock`;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        const descriptor = fs.openSync(lockPath, 'wx');
+        fs.writeFileSync(descriptor, String(process.pid));
+        return () => {
+          fs.closeSync(descriptor);
+          fs.rmSync(lockPath, { force: true });
+        };
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        try {
+          if (Date.now() - fs.statSync(lockPath).mtimeMs > 10_000) {
+            fs.rmSync(lockPath, { force: true });
+            continue;
+          }
+        } catch (_) {
+          continue;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    throw new Error('データベースが別の画面で使用中です。少し待ってから再試行してください。');
   }
 
   persist() {
-    const temporaryPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(temporaryPath, this.exportBytes());
+    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryPath, Buffer.from(this.db.export()));
     try {
       fs.renameSync(temporaryPath, this.filePath);
     } catch (error) {
@@ -195,11 +292,11 @@ class UsageDatabase {
       fs.rmSync(this.filePath, { force: true });
       fs.renameSync(temporaryPath, this.filePath);
     }
+    this.fileSignature = this.getFileSignature();
   }
 
   close() {
     if (!this.db) return;
-    this.persist();
     this.db.close();
     this.db = null;
   }

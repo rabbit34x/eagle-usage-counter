@@ -57,6 +57,41 @@ test('undo reverts the whole latest batch without deleting audit rows', () => {
   }
 });
 
+test('decrement reverts the latest event for each selected item', () => {
+  const { database, directory } = fixture();
+  try {
+    database.recordUsage([item('a'), item('b')]);
+    database.recordUsage([item('a')]);
+    const result = database.decrementUsage(['a', 'b', 'missing']);
+
+    assert.equal(result.count, 2);
+    assert.equal(database.getCounts(['a']).get('a').usage_count, 1);
+    assert.equal(database.getCounts(['b']).has('b'), false);
+    assert.equal(database.query('SELECT COUNT(*) AS count FROM usage_events')[0].count, 3);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('separate plugin views do not overwrite each other\'s writes', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'eagle-usage-counter-'));
+  const filePath = path.join(directory, 'usage.sqlite');
+  try {
+    const inspector = new UsageDatabase(SQL, filePath);
+    const dashboard = new UsageDatabase(SQL, filePath);
+    inspector.recordUsage([item('a')]);
+    dashboard.recordUsage([item('b')]);
+
+    assert.equal(inspector.getStats().event_count, 2);
+    assert.equal(dashboard.getStats().event_count, 2);
+    inspector.close();
+    dashboard.close();
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('persists and reopens the sqlite file', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'eagle-usage-counter-'));
   const filePath = path.join(directory, 'usage.sqlite');
