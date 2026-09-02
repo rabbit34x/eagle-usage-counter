@@ -309,6 +309,24 @@ function renderActivity() {
   elements['activity-grid'].replaceChildren(...cells);
 }
 
+async function selectRankingItem(itemId) {
+  try {
+    const item = await eagle.item.getById(itemId);
+    if (typeof item?.select === 'function') {
+      await item.select();
+      return;
+    }
+    if (typeof eagle.item.select === 'function') {
+      await eagle.item.select([itemId]);
+      return;
+    }
+    throw new Error('このEagleバージョンは画像選択APIに対応していません。');
+  } catch (error) {
+    console.error(error);
+    elements.status.textContent = `画像を選択できませんでした: ${error.message}`;
+  }
+}
+
 function renderRanking(range) {
   const ranking = database.getRanking({ ...range, limit: 100 });
   elements['ranking-note'].textContent = range.label;
@@ -316,7 +334,7 @@ function renderRanking(range) {
     const row = document.createElement('li');
     row.className = 'rank-row';
     row.title = 'クリックしてEagle上で選択';
-    row.addEventListener('click', () => eagle.item.select([item.eagle_item_id]));
+    row.addEventListener('click', () => selectRankingItem(item.eagle_item_id));
     const number = document.createElement('span');
     number.className = 'rank-number';
     number.textContent = String(index + 1);
