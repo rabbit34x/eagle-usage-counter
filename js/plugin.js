@@ -1,9 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const initSqlJs = require('sql.js');
-const { UsageDatabase } = require('./database');
-const { getDatabasePath } = require('./storage');
 
+let initSqlJs;
+let UsageDatabase;
+let getDatabasePath;
 let SQL;
 let database;
 let selectedItems = [];
@@ -209,6 +209,9 @@ bindEvents();
 eagle.onPluginCreate(async (plugin) => {
   pluginPath = plugin.path;
   try {
+    initSqlJs = require(path.join(pluginPath, 'node_modules', 'sql.js'));
+    ({ UsageDatabase } = require(path.join(pluginPath, 'js', 'database.js')));
+    ({ getDatabasePath } = require(path.join(pluginPath, 'js', 'storage.js')));
     SQL = await initSqlJs({
       locateFile: (file) => path.join(pluginPath, 'node_modules', 'sql.js', 'dist', file),
     });

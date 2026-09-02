@@ -1,7 +1,4 @@
 const path = require('path');
-const initSqlJs = require('sql.js');
-const { UsageDatabase } = require('./database');
-const { getDatabasePath } = require('./storage');
 
 let database;
 let selectedItems = [];
@@ -70,6 +67,9 @@ decrementButton.addEventListener('click', () => run(async () => {
 eagle.onPluginCreate(async (plugin) => {
   try {
     document.body.setAttribute('theme', await eagle.app.theme);
+    const initSqlJs = require(path.join(plugin.path, 'node_modules', 'sql.js'));
+    const { UsageDatabase } = require(path.join(plugin.path, 'js', 'database.js'));
+    const { getDatabasePath } = require(path.join(plugin.path, 'js', 'storage.js'));
     const SQL = await initSqlJs({
       locateFile: (file) => path.join(plugin.path, 'node_modules', 'sql.js', 'dist', file),
     });

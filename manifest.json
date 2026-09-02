@@ -1,11 +1,19 @@
 {
   "id": "com.rabbit34x.eagle-usage-counter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "platform": "all",
   "arch": "all",
   "name": "Usage Counter",
   "logo": "./logo.png",
-  "keywords": ["counter", "history", "ranking", "usage", "使用回数", "履歴", "ランキング"],
+  "keywords": [
+    "counter",
+    "history",
+    "ranking",
+    "usage",
+    "使用回数",
+    "履歴",
+    "ランキング"
+  ],
   "devTools": true,
   "main": {
     "url": "index.html",
